@@ -1,0 +1,11 @@
+*.rda
+*.html
+*.gz
+*.txt
+*.sqlite
+*/*_cache
+*/*_files
+*.Rproj
+.Rproj.user
+.DS_Store
+data
