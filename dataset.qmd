@@ -209,7 +209,7 @@ donor |> pull(cols(tissue)) |> table()
 ```
 
 
-```{r}
+```{r quantify_tss}
 se <- plyxp(se,
       \(se) {
         rr <- rowRanges(se)
