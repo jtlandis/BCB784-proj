@@ -192,7 +192,7 @@ se <- SummarizedExperiment(
     ))
   ) |>
   ungroup()
-se
+# se
 
 RBP_kd <- filter(se, cols( !is.na(RBP_kd) ))
 # the above is a subset of the below.
@@ -207,3 +207,42 @@ donor <- filter(se,
 donor |> pull(cols(tissue)) |> table()
 
 ```
+
+
+```{r}
+se <- plyxp(se,
+      \(se) {
+        rr <- rowRanges(se)
+        rr$.start <- start(rr)
+        rr$.seqnames <- seqnames(rr)
+        rowRanges(se) <- rr
+        se
+      })
+se2 <- mutate(
+  se,
+  rows(
+    new_transcript = is_hash(transcript_id)
+  )) |>
+  group_by(rows(.start, .seqnames = as.character(.seqnames))) |>
+  summarise(rows(
+    n = n(),
+    n_new = sum(new_transcript),
+    n_old = n - n_new
+  ),
+  counts = list(counts))
+
+se2 <- ungroup(se2) |>
+  mutate(
+    rows(
+      type = case_when(
+        n_new == 0 ~ "old",
+        n_old == 0 ~ "new",
+        TRUE ~ "mix"
+      )
+    )
+  )
+
+pull(se2, rows(type)) |> table()
+```
+
+
