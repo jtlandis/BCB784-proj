@@ -1,0 +1,67 @@
+sample_name,tissue_id,tissue
+GTEX-OIZI,0008,Cells - Cultured fibroblasts
+GTEX-OXRL,0008,Cells - Cultured fibroblasts
+GTEX-PSDG,0008,Cells - Cultured fibroblasts
+GTEX-QEG5,0008,Cells - Cultured fibroblasts
+GTEX-QV44,0008,Cells - Cultured fibroblasts
+GTEX-R55E,0008,Cells - Cultured fibroblasts
+GTEX-RWS6,0008,Cells - Cultured fibroblasts
+GTEX-S4Z8,0008,Cells - Cultured fibroblasts
+GTEX-S95S,0008,Cells - Cultured fibroblasts
+GTEX-WFG7,0008,Cells - Cultured fibroblasts
+GTEX-WY7C,0008,Cells - Cultured fibroblasts
+GTEX-QDT8,0011-R10A,Brain - Frontal Cortex (BA9)
+GTEX-T5JC,0011-R10A,Brain - Frontal Cortex (BA9)
+GTEX-1192X,0011-R10a,Brain - Frontal Cortex (BA9)
+GTEX-14BIL,0011-R10a,Brain - Frontal Cortex (BA9)
+GTEX-13X6J,0011-R10b,Brain - Frontal Cortex (BA9)
+GTEX-15DCD,0011-R10b,Brain - Frontal Cortex (BA9)
+GTEX-Q2AG,0011-R11A,Brain - Cerebellar Hemisphere
+GTEX-T5JC,0011-R11A,Brain - Cerebellar Hemisphere
+GTEX-11H98,0011-R11b,Brain - Cerebellar Hemisphere
+GTEX-13VXU,0011-R11b,Brain - Cerebellar Hemisphere
+GTEX-17F97,0011-R11b,Brain - Cerebellar Hemisphere
+GTEX-1H3NZ,0011-R11b,Brain - Cerebellar Hemisphere
+GTEX-145MH,0011-R3b,Brain - Anterior cingulate cortex (BA24)
+GTEX-15ER7,0011-R5b,Brain - Caudate (basal ganglia)
+GTEX-T5JC,0011-R7A,Brain - Putamen (basal ganglia)
+GTEX-15ER7,0011-R7a,Brain - Putamen (basal ganglia)
+GTEX-11TTK,0011-R7b,Brain - Putamen (basal ganglia)
+GTEX-1313W,0011-R7b,Brain - Putamen (basal ganglia)
+GTEX-13RTJ,0011-R7b,Brain - Putamen (basal ganglia)
+GTEX-14C5O,0011-R7b,Brain - Putamen (basal ganglia)
+GTEX-1GN1W,0226,Heart - Atrial Appendage
+GTEX-1HBPH,0226,Heart - Atrial Appendage
+GTEX-1IDJD,0226,Heart - Atrial Appendage
+GTEX-ZVZP,0226,Heart - Left Ventricle
+GTEX-1C64N,0326,Muscle - Skeletal
+GTEX-1LVA9,0326,Muscle - Skeletal
+GTEX-OHPL,0326,Heart - Left Ventricle
+GTEX-R53T,0326,Liver
+GTEX-ZT9X,0326,Lung
+GTEX-13QBU,0426,Heart - Left Ventricle
+GTEX-1KXAM,0426,Lung
+GTEX-Y5LM,0426,Liver
+GTEX-14BMU,0526,Lung
+GTEX-WYVS,0526,Lung
+GTEX-1I6K7,0626,Heart - Left Ventricle
+GTEX-13QJ3,0726,Muscle - Skeletal
+GTEX-1IDJU,0726,Heart - Left Ventricle
+GTEX-WY7C,0726,Liver
+GTEX-1211K,0826,Lung
+GTEX-1IDJF,0826,Heart - Atrial Appendage
+GTEX-ZPU1,0826,Liver
+GTEX-14XAO,0926,Heart - Atrial Appendage
+GTEX-WY7C,1126,Heart - Atrial Appendage
+GTEX-1H11D,1226,Heart - Left Ventricle
+GTEX-1I6K7,1226,Lung
+GTEX-1IDJD,1226,Adipose - Subcutaneous
+GTEX-S4P3,1326,Breast - Mammary Tissue
+GTEX-15RIE,1726,Heart - Left Ventricle
+GTEX-ZT9X,1826,Muscle - Skeletal
+GTEX-17MFQ,1926,Muscle - Skeletal
+GTEX-ZF29,2026,Liver
+GTEX-1KXAM,2426,Muscle - Skeletal
+GTEX-UTHO,2426,Liver
+GTEX-WYJK,2426,Pancreas
+K562,NA,K562
