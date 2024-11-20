@@ -1,3 +1,9 @@
+#################################
+### DO NOT RUN 
+### ONLY HERE TO SHOW
+### HOW TO GENERATE RDS FILE
+#################################
+
 
 .file <- box::file(
   "GTEx_Analysis_v10_RSEMv1.3.3_transcripts_expected_count.txt.gz"
