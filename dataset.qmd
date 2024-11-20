@@ -300,7 +300,7 @@ pull(se2, rows(encode_type)) |> table()
 
 ```{r}
 # rr <- rowRanges(se(se))
-se_small <- readRDS(box::file("data/bulk_RNAseq_small.rds"))
+se_small <- readRDS(box::file("data/bulk_RNAseq_small_v8.rds"))
 # rr_small <- rowRanges(se_small)
 # rr_split <- split(rr, rr$gene_id)
 # rr_sml_split <- split(rr_small, rr_small$gene_id)
@@ -366,7 +366,7 @@ apply_by <- function(..., .fun, .by, .args = NULL) {
     .args = .args
   )
 }
-apply_by(1:4, .f = sum, .by = c(1,1,2,2))
+
 merged_se |>
   mutate(
     cols(
