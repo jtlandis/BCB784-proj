@@ -210,7 +210,8 @@ donor |> pull(cols(tissue)) |> table()
 
 ```{r more-meta-data}
 #| eval: false
-# `%|E|%` <- function(e1, e2) if (rlang::is_empty(e1)) e2 else e1 
+
+`%|E|%` <- function(e1, e2) if (rlang::is_empty(e1)) e2 else e1 
 # se |>
 #   mutate(
 #     cols(
@@ -348,50 +349,19 @@ merge_cols <- function(x, y, ...) {
 merged_se <- merge_cols(se_long, se_short, counts,
                         cols(sample_name, tissue, seq_source))
 
-apply_by <- function(..., .fun, .by, .args = NULL) {
-  # browser()
-  
-  .l <- rlang::dots_list(...) 
-  .l <- vctrs::vec_recycle_common(!!!.l)
-  .l <- lapply(.l, split, .by)
-  .fun <- rlang::as_function(.fun)
-  purrr::map(
-    seq_along(.l[[1]]),
-    \(.i, l, .fun, .args) {
-      .l <- lapply(l, `[[`, .i)
-      rlang::exec(.f = .fun, !!!.l, !!!.args)
-    },
-    l = .l,
-    .fun = .fun,
-    .args = .args
-  )
-}
-
-merged_se |>
-  mutate(
-    cols(
-      total = colSums(.assays_asis$counts),
-      scaleFactor = total/1e6
-    ),
-    scaled = counts / .cols$scaleFactor,
-    large = scaled > 1
-  ) |>
-  filter(
-    rows(
-      #find genes that have "large" counts in both 'long' and
-      # 'short' reads
-      purrr::map_lgl(
-        .assays$large,
-        ~ rlang::exec(all, !!!apply_by(.x, .fun = any, .by = .cols_asis$seq_source)))))
-        # .f = apply_by,
-        # .by = .cols_asis$seq_source,
-        # .fun = ~ any(.x)) |>
-        # purrr::map_lgl(~ rlang::exec(all, !!!.x))
-  #   )
-  # )
-  
-
-
-  
 ```
+
+
+```{r fig1c-attempt}
+
+library(ggplot2)
+
+# local to not retain saved values
+local({
+  
+})
+
+
+```
+
 
