@@ -359,7 +359,7 @@ merged_se <- merge_cols(se_short, se_long, counts,
 library(ggplot2)
 
 # these should be aligned in terms of the transcripts!
-list(short = se_short,
+plot_data <- list(short = se_short,
      long = se_long) |>
   lapply(
     mutate,
@@ -401,9 +401,11 @@ list(short = se_short,
   filter(if_all(ends_with("read"),
                 ~ .x > 1)) |>
   mutate(across(ends_with("read"),
-                ~ log10(.x))) |>
-  ggplot(aes(short_read, long_read)) +
-  geom_point(color = "grey") +
+                ~ log10(.x), 
+                .names = "{.col}_log10"))
+cor(plot_data$short_read_log10, plot_data$long_read_log10)
+ggplot(plot_data, aes(short_read_log10, long_read_log10)) +
+  geom_hex() +
   geom_abline(color = "limegreen", slope = 1, intercept = 0) +
   theme_bw() +
   labs(y = "log10 ONT TPM", x = "log10 Illumina TPM")
