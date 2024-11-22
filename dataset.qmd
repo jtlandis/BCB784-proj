@@ -294,14 +294,14 @@ se2 <- ungroup(se2) |>
   )
 
 
-saveRDS(se(se2), box::file("data/longRead.rds"))
+# saveRDS(se(se2), box::file("data/longRead.rds"))
 
 pull(se2, rows(encode_type)) |> table()
 ```
 
 ```{r}
 # rr <- rowRanges(se(se))
-se_small <- readRDS(box::file("data/bulk_RNAseq_small_v8.rds"))
+se_small <- readRDS(box::file("data/bulk_RNAseq_shortread-subset_v8.1.rds"))
 # rr_small <- rowRanges(se_small)
 # rr_split <- split(rr, rr$gene_id)
 # rr_sml_split <- split(rr_small, rr_small$gene_id)
@@ -315,9 +315,10 @@ se_small <- readRDS(box::file("data/bulk_RNAseq_small_v8.rds"))
 ```
 
 ```{r}
+se_short <- filter(new_plyxp(se_small), rows(transcript_type == "protein_coding"))
 .common_trans <- intersect(
   rowData(se)$transcript_id,
-  rowData(se_small)$transcript_id
+  rowData(se_short)$transcript_id
 )
 se_long <- se[match(.common_trans, rowData(se)$transcript_id),] |>
   mutate(cols(seq_source = "long_read"))
@@ -346,7 +347,8 @@ merge_cols <- function(x, y, ...) {
   )
   new_plyxp(se)
 }
-merged_se <- merge_cols(se_long, se_short, counts,
+# we discussed keeping the "richer" annotations
+merged_se <- merge_cols(se_short, se_long, counts,
                         cols(sample_name, tissue, seq_source))
 
 ```
@@ -356,11 +358,55 @@ merged_se <- merge_cols(se_long, se_short, counts,
 
 library(ggplot2)
 
-# local to not retain saved values
-local({
-  
-})
-
+# these should be aligned in terms of the transcripts!
+list(short = se_short,
+     long = se_long) |>
+  lapply(
+    mutate,
+    rows(trans_width = lapply(width(exons), sum, 1) |>
+           purrr::map_dbl(identity),
+         #kilobases
+         trans_kb = trans_width/1000),
+    RPK = counts/.rows$trans_kb,
+    cols(
+      scaleFactor = colSums(.assays_asis$RPK)/1e6
+    ),
+    TPM = RPK/.cols$scaleFactor
+  ) |>
+  lapply(
+    select,
+    TPM,
+    cols(sample_name, tissue, seq_source)
+  ) |> {
+    \(plot_data) {
+      short <- colData(plot_data$short) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      long <- colData(plot_data$long) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      common <- intersect(short, long)
+      rownames(se(plot_data[[2]])) <- rownames(se(plot_data[[1]]))
+      purrr::map2(
+        plot_data,
+        list(short, long),
+        ~ .x[,match(common, .y)])
+    }
+  }() |>
+  lapply(as_tibble) |>
+  dplyr::bind_rows() |>
+  tidyr::pivot_wider(
+    id_cols = c(.features, sample_name, tissue),
+    names_from = seq_source,
+    values_from = TPM
+  ) |>
+  filter(if_all(ends_with("read"),
+                ~ .x > 1)) |>
+  mutate(across(ends_with("read"),
+                ~ log10(.x))) |>
+  ggplot(aes(short_read, long_read)) +
+  geom_point(color = "grey") +
+  geom_abline(color = "limegreen", slope = 1, intercept = 0) +
+  theme_bw() +
+  labs(y = "log10 ONT TPM", x = "log10 Illumina TPM")
 
 ```
 
