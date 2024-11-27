@@ -300,7 +300,8 @@ pull(se2, rows(encode_type)) |> table()
 
 ```{r}
 # rr <- rowRanges(se(se))
-se_small <- readRDS(box::file("data/bulk_RNAseq_small.rds"))
+# se_small <- readRDS(box::file("data/bulk_RNAseq_small.rds"))
+se_small <- readRDS(box::file("data/bulk_RNAseq_small_v8.rds"))
 # rr_small <- rowRanges(se_small)
 # rr_split <- split(rr, rr$gene_id)
 # rr_sml_split <- split(rr_small, rr_small$gene_id)
@@ -366,32 +367,132 @@ apply_by <- function(..., .fun, .by, .args = NULL) {
     .args = .args
   )
 }
-apply_by(1:4, .f = sum, .by = c(1,1,2,2))
-merged_se |>
-  mutate(
-    cols(
-      total = colSums(.assays_asis$counts),
-      scaleFactor = total/1e6
-    ),
-    scaled = counts / .cols$scaleFactor,
-    large = scaled > 1
-  ) |>
-  filter(
-    rows(
-      #find genes that have "large" counts in both 'long' and
-      # 'short' reads
-      purrr::map_lgl(
-        .assays$large,
-        ~ rlang::exec(all, !!!apply_by(.x, .fun = any, .by = .cols_asis$seq_source)))))
-        # .f = apply_by,
-        # .by = .cols_asis$seq_source,
-        # .fun = ~ any(.x)) |>
-        # purrr::map_lgl(~ rlang::exec(all, !!!.x))
-  #   )
-  # )
+
+# Justin said this function isn't neeed so not using it for now. 
+# apply_by(1:4, .f = sum, .by = c(1,1,2,2))
+# merged_se |>
+#   mutate(
+#     cols(
+#       
+#       total = colSums(.assays_asis$counts),
+#       scaleFactor = total/1e6
+#     ),
+#     scaled = counts / .cols$scaleFactor,
+#     large = scaled > 1
+#   ) |>
+#   filter(
+#     rows(
+#       #find genes that have "large" counts in both 'long' and
+#       # 'short' reads
+#       purrr::map_lgl(
+#         .assays$large,
+#         ~ rlang::exec(all, !!!apply_by(.x, .fun = any, .by = .cols_asis$seq_source)))))
+#         # .f = apply_by,
+#         # .by = .cols_asis$seq_source,
+#         # .fun = ~ any(.x)) |>
+#         # purrr::map_lgl(~ rlang::exec(all, !!!.x))
+#   #   )
+#   # )
   
 
 
   
 ```
 
+
+```{r long vs short}
+library(ggplot2)
+
+# How many common transcripts? Done by Justin 
+cat("\nThere are", 
+    length(.common_trans), 
+    "common transcripts between long and short-read datasets!\n")
+
+table(rowData(se)$gene_id %>% grepl(x = ., "ENSG", fixed = T))
+
+# Some of the data in the longread SE don't have ENSG gene ids to subset by. 
+# Here, I make sure that every gene has an ENSG id. 
+which.contain.gen <- grepl(x = rowData(se)$gene_id, pattern = "ENSG", fixed = T)
+long <- se[which.contain.gen, ]
+
+# I don't expect this to be an issue in the short read, but for thoroughness:
+which.contain.gen.short <- grepl(x = rowData(se_small)$gene_id, pattern = "ENSG", fixed = T)
+short <- se_small[which.contain.gen.short, ]
+
+# What are the dimensions of these subset SE objects? 
+dim(long)
+dim(short)
+
+# usage of split: splits the transcripts by gene
+# this way, we can compare how many transcript *types* are detected per gene in 
+# long and short read data. 
+long.split <- split(rowData(long)$transcript_id, rowData(long)$gene_id)
+short.split <- split(rowData(short)$transcript_id, rowData(short)$gene_id)
+
+common.genes <- intersect(names(long.split), names(short.split))
+
+# How many common genes are there (meeting my criteria)? 
+length(common.genes) # quite a few 
+
+# Subset both lists of genes and transcripts to only include the genes in common
+long.split <- long.split[names(long.split) %in% common.genes]
+short.split <- short.split[names(short.split) %in% common.genes]
+
+# Get the number of transcripts per gene 
+long.lens <- sapply(X = long.split, FUN = function(x){length(x)})
+short.lens <- sapply(X = short.split, FUN = function(x){length(x)})
+
+# Like Justin's previous code, 
+# I'm assuming anything without a hash function, with an ENST id, is previously known. 
+
+num.novel.long <- sapply(X = long.split, 
+                        FUN = function(x)
+                          {length(x) - length(sum(grepl(x, pattern = "ENST", fixed = T)))}
+                        )
+
+# Create a dataframe for comparisons of long vs. short read: 
+long.vs.short <- 
+  merge(data.frame(gene.id = names(long.lens), num.longread.tx = long.lens, row.names = NULL), 
+        data.frame(gene.id = names(short.lens), num.shortread.tx = short.lens, row.names = NULL), 
+        by = "gene.id")
+long.vs.short <- 
+  merge(long.vs.short, 
+        data.frame(gene.id = names(num.novel.long), 
+                   num.novel.longread.tx = num.novel.long, 
+                   row.names = NULL), 
+        by = "gene.id")
+
+# Some dataframe manipulations: on average, are there more long read tx vs short read tx? 
+
+long.vs.short <- 
+  long.vs.short %>%
+  mutate(delta.long.short = num.longread.tx - num.shortread.tx)
+
+plot.subtitle <- 
+  paste("Mean + sd: ", 
+    round(mean(long.vs.short$delta.long.short), 4), "+/-", round(sd(long.vs.short$delta.long.short), 4))
+
+# some plotting 
+long.vs.short %>% 
+  ggplot(aes(x = delta.long.short)) + 
+  geom_density() + 
+  geom_rug() +
+  geom_vline(xintercept = mean(long.vs.short$delta.long.short), color = "red") + 
+  xlab("For each gene: # Transcripts in Long Read - # Transcripts in Short Read") + 
+  ggtitle(label = "Difference in number of transcripts by gene", 
+          subtitle = plot.subtitle)
+
+```
+
+- genes from literature gtex highly exp in liver 
+- which genes are more expressed in long read 
+- which genes have a lot of novel long read transcripts 
+```{r}
+
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+
+# how many genes have at least one 
+length(which(num.novel.long >= 1))
+
+```
