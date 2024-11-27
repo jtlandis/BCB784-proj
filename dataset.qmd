@@ -189,7 +189,7 @@ se <- SummarizedExperiment(
       grepl("exp", sample_id) ~ TRUE, # exp for experimental purtebation
       any(grepl("exp", sample_id)) ~ FALSE, # all other items in group are false
       TRUE ~ NA # everything else should be NA
-    ))
+      ))
   ) |>
   ungroup()
 # se
@@ -208,6 +208,42 @@ donor |> pull(cols(tissue)) |> table()
 
 ```
 
+```{r more-meta-data}
+#| eval: false
+
+`%|E|%` <- function(e1, e2) if (rlang::is_empty(e1)) e2 else e1 
+# se |>
+#   mutate(
+#     cols(
+#       .string = stringr::str_match_all(
+#         sample_id, "(GTEX-[^-]+)-([^-]+-?.*)-SM-(.*)"
+#       ),
+#       tissue_id = purrr::map_chr(.string, ~ .x[,3] %|E|% NA_character_),
+#       rep_id = purrr::map_chr(.string,  ~ .x[,4] %|E|% NA_character_),
+#       tech_id = stringr::str_extract(rep_id, "_.*") |> stringr::str_remove("^_"),
+#       rep_id = stringr::str_remove(rep_id, "_.*")
+#     )
+#   ) |>
+#   colData() |>
+#   as_tibble() |>
+#   select(sample_id, sample_name, tissue_id, rep_id, tech_id, tissue) |>
+#   distinct(sample_name, tissue_id, tissue) |>
+#   arrange(tissue_id, sample_name) |>
+#   readr::write_csv(file = "data/tissue_meta_map.csv")
+# 
+# se(se) |> rowRanges() |> {
+#     \(x) {
+#         tibble(
+#             gene_id = x$gene_id,
+#             start = start(x),
+#             end = end(x),
+#             seqnames = as.character(seqnames(x)),
+#             strand = as.character(strand(x))
+#         )
+#     }
+# }() |> readr::write_csv(file = "data/ranges_meta_map.csv")
+```
+
 
 ```{r quantify_tss}
 se <- plyxp(se,
@@ -221,28 +257,159 @@ se <- plyxp(se,
 se2 <- mutate(
   se,
   rows(
-    new_transcript = is_hash(transcript_id)
+    new_transcript = is_hash(transcript_id),
+    has_ensbl_parent = grepl("^ENSG", gene_id)
   )) |>
-  group_by(rows(.start, .seqnames = as.character(.seqnames))) |>
-  summarise(rows(
+  group_by(rows(.start, .seqnames = as.character(.seqnames))) 
+rr <-  se2 |> {
+    function(se) {
+      row_groups <- group_data(se)$row_groups
+      groups <- vctrs::list_unchop(
+        as.list(row_groups$.indices_group_id),
+        indices = row_groups$.indices)
+      rr <- rowRanges(se(se))
+      mcols(rr) <- NULL
+      mcols(rr)$.exons <- rowData(se)$exons
+      split(rr, groups)
+    }
+  }()
+se2 <- se2 |> summarise(rows(
     n = n(),
-    n_new = sum(new_transcript),
-    n_old = n - n_new
+    n_novel = sum(!has_ensbl_parent & new_transcript),
+    n_novel_ensbl = sum(has_ensbl_parent & new_transcript),
+    n_not_novel = sum(!new_transcript),
+    across(c(gene_id, transcript_id), list)
   ),
   counts = list(counts))
-
+rowData(se2)$.ranges <- rr
 se2 <- ungroup(se2) |>
   mutate(
     rows(
-      type = case_when(
-        n_new == 0 ~ "old",
-        n_old == 0 ~ "new",
-        TRUE ~ "mix"
-      )
+      # similar to file permissions,
+      # 1 -> novel: contains transcript with no associated gene parent and has hash
+      # 2 -> ensbl novel: contains transcript with associated gene parent and has hash
+      # 4 -> not novel: contains transcript that has no hash (assumed to have a genee parent)
+      encode_type = (n_novel>0) + (2 * (n_novel_ensbl>0)) + (4 * (n_not_novel>0))
     )
   )
 
-pull(se2, rows(type)) |> table()
+
+# saveRDS(se(se2), box::file("data/longRead.rds"))
+
+pull(se2, rows(encode_type)) |> table()
+```
+
+```{r}
+# rr <- rowRanges(se(se))
+se_small <- readRDS(box::file("data/bulk_RNAseq_shortread-subset_v8.1.rds"))
+# rr_small <- rowRanges(se_small)
+# rr_split <- split(rr, rr$gene_id)
+# rr_sml_split <- split(rr_small, rr_small$gene_id)
+# same_names <- names(rr_sml_split)[names(rr_sml_split) %in% names(rr_split)]
+# 
+# rr_split <- rr_split[same_names]
+# rr_sml_split <- rr_sml_split[same_names]
+# .common_trans <- intersect(rr$transcript_id, rr_small$transcript_id)
+# long_rr_trans <- slice(rr, match(.common_trans, transcript_id))
+# short_rr_trans <- slice(rr_small, match(.common_trans, transcript_id)) 
+```
+
+```{r}
+se_short <- filter(new_plyxp(se_small), rows(transcript_type == "protein_coding"))
+.common_trans <- intersect(
+  rowData(se)$transcript_id,
+  rowData(se_short)$transcript_id
+)
+se_long <- se[match(.common_trans, rowData(se)$transcript_id),] |>
+  mutate(cols(seq_source = "long_read"))
+se_short <- se_small[match(.common_trans, rowData(se_small)$transcript_id),] |>
+  new_plyxp() |>
+  mutate(cols(seq_source = "short_read"),
+         counts = as.integer(round(rsem)))
+# assume x, y have same row info
+merge_cols <- function(x, y, ...) {
+  # browser()
+  quos <- plyxp:::plyxp_quos(..., .named = F, .ctx_default = "assays",
+                             .ctx_opt = "cols")
+  quos <- split(lapply(quos, rlang::quo_get_expr),
+                vapply(quos, attr, "plyxp:::ctx", FUN.VALUE = ""))
+  
+  x <- select(x, !!!quos[["assays"]], rows(everything()),
+              cols(!!!quos[["cols"]]))
+  y <- select(y, !!!quos[["assays"]], cols(!!!quos[["cols"]])) |>
+    plyxp(\(y, x) {
+      rowRanges(y) <- rowRanges(x)
+      y
+    }, x = se(x))
+  
+  se <- cbind(
+    se(x), se(y)
+  )
+  new_plyxp(se)
+}
+# we discussed keeping the "richer" annotations
+merged_se <- merge_cols(se_short, se_long, counts,
+                        cols(sample_name, tissue, seq_source))
+
+```
+
+
+```{r fig1c-attempt}
+
+library(ggplot2)
+
+# these should be aligned in terms of the transcripts!
+plot_data <- list(short = se_short,
+     long = se_long) |>
+  lapply(
+    mutate,
+    rows(trans_width = lapply(width(exons), sum, 1) |>
+           purrr::map_dbl(identity),
+         #kilobases
+         trans_kb = trans_width/1000),
+    RPK = counts/.rows$trans_kb,
+    cols(
+      scaleFactor = colSums(.assays_asis$RPK)/1e6
+    ),
+    TPM = RPK/.cols$scaleFactor
+  ) |>
+  lapply(
+    select,
+    TPM,
+    cols(sample_name, tissue, seq_source)
+  ) |> {
+    \(plot_data) {
+      short <- colData(plot_data$short) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      long <- colData(plot_data$long) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      common <- intersect(short, long)
+      rownames(se(plot_data[[2]])) <- rownames(se(plot_data[[1]]))
+      purrr::map2(
+        plot_data,
+        list(short, long),
+        ~ .x[,match(common, .y)])
+    }
+  }() |>
+  lapply(as_tibble) |>
+  dplyr::bind_rows() |>
+  tidyr::pivot_wider(
+    id_cols = c(.features, sample_name, tissue),
+    names_from = seq_source,
+    values_from = TPM
+  ) |>
+  filter(if_all(ends_with("read"),
+                ~ .x > 1)) |>
+  mutate(across(ends_with("read"),
+                ~ log10(.x), 
+                .names = "{.col}_log10"))
+cor(plot_data$short_read_log10, plot_data$long_read_log10)
+ggplot(plot_data, aes(short_read_log10, long_read_log10)) +
+  geom_hex() +
+  geom_abline(color = "limegreen", slope = 1, intercept = 0) +
+  theme_bw() +
+  labs(y = "log10 ONT TPM", x = "log10 Illumina TPM")
+
 ```
 
 
