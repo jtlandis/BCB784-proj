@@ -404,12 +404,174 @@ plot_data <- list(short = se_short,
                 ~ log10(.x), 
                 .names = "{.col}_log10"))
 cor(plot_data$short_read_log10, plot_data$long_read_log10)
-ggplot(plot_data, aes(short_read_log10, long_read_log10)) +
-  geom_hex() +
+.plot_trans <- ggplot(plot_data, aes(short_read_log10, long_read_log10)) +
+  geom_hex(binwidth = .125) +
+  scale_fill_gradient(low = "white", high = "black") +
   geom_abline(color = "limegreen", slope = 1, intercept = 0) +
-  theme_bw() +
-  labs(y = "log10 ONT TPM", x = "log10 Illumina TPM")
-
+  theme_classic(base_size = 22) +
+  labs(y = "log10 ONT TPM", x = "log10 Illumina TPM",
+       title = "transcripts") +
+  guides(fill = guide_colorbar(
+    position = "bottom", theme = theme(
+      legend.title = element_text(vjust = .7),
+      legend.text = element_text(size = 12, angle = 45, vjust = 1)))) +
+  coord_equal(xlim = c(0, 5), ylim = c(0, 5))
+  # theme(legend.position = "bottom", legend.text = element_text(angle = 90)) 
+.plot_trans
+ggsave(box::file("data", "fig1c-trans.png"), plot = .plot_trans,
+       device = "png", height = 7, width = 5)
 ```
 
+```{r fig1c-attempt2}
 
+# downstream issue where the longread data has ENSG00000002586.18 (and a few 
+# other genes) annotated on both X and Y chromosomes but in short read data
+# it is only annotated on the X?
+# 
+se_short <- filter(new_plyxp(se_small),
+                   rows(transcript_type == "protein_coding")) |>
+  plyxp_on(
+    mutate, .on = rowRanges,
+    combo = paste(gene_id, seqnames, strand)
+  )
+se_long <- plyxp_on(
+  se, mutate, .on = rowRanges,
+  combo = paste(gene_id, seqnames, strand)
+)
+
+.common_genes <- intersect(
+  rowData(se_long)$combo,
+  rowData(se_short)$combo
+)
+
+se_long <- filter(se_long, rows(combo %in% .common_genes)) |>
+  mutate(cols(seq_source = "long_read"))
+se_short <- se_short |>
+  filter(rows(combo %in% .common_genes)) |>
+  mutate(cols(seq_source = "short_read"),
+         counts = as.integer(round(rsem)))
+
+# these should be aligned in terms of the transcripts!
+plot_data <- list(short = se_short,
+     long = se_long) |> 
+  lapply(
+    arrange,
+    rows(gene_id)
+  ) |>
+  lapply(
+    mutate,
+    rows(
+      .start = lapply(start(exons), min) |> purrr::map_int(identity),
+      .end = lapply(end(exons), max) |> purrr::map_int(identity),
+      .seqnames = { seqs <- exons@unlistData@seqnames |>
+        as.character()
+      purrr::map2(start(exons@partitioning),
+                  end(exons@partitioning),
+                  function(i,j,x) x[c(i,j)], x = seqs) |>
+        purrr::map_chr(unique)
+      },
+      .strand = {
+        strnd <- exons@unlistData@strand |> as.character()
+        purrr::map2(
+          start(exons@partitioning),
+          end(exons@partitioning),
+          function(i,j,x) x[c(i,j)], x = strnd) |>
+          purrr::map_chr(unique)
+        }
+    )
+  ) |>
+  lapply(
+    group_by,
+    rows(gene_id)
+  ) |>
+  lapply(
+    summarise,
+    counts = colSums(counts),
+    rows(
+      across(matches("\\.[se]"), list),
+      .features = unique(gene_id)
+    )
+  ) |>
+  lapply(ungroup) |>
+  lapply(
+    mutate,
+    rows(
+      .start = purrr::map_int(.start, min),
+      .end = purrr::map_int(.end, max),
+      across(c(.seqnames, .strand), ~purrr::map_chr(.x, unique)),
+      gene_range = GRanges(.seqnames, IRanges(start = .start, end = .end),
+                          strand = .strand),
+      across(matches("\\.[se]"), ~ NULL)
+    )
+  ) |>
+  lapply(
+    mutate,
+    rows(
+      #kilobases
+      trans_kb = width(gene_range)/1000),
+    RPK = counts/.rows$trans_kb,
+    cols(
+      scaleFactor = colSums(.assays_asis$RPK)/1e6
+    ),
+    TPM = RPK/.cols$scaleFactor
+  ) |> {
+    \(x) {
+      .common <- lapply(x, rowData) |>
+        lapply(`[[`, "gene_id")
+      .common <- intersect(.common[[1]], .common[[2]])
+      lapply(
+        x,
+        function(x, g) x[match(g, rownames(se(x))),],
+        g = .common
+      )
+    } 
+  }() |>
+  lapply(
+    select,
+    TPM,
+    cols(sample_name, tissue, seq_source)
+  ) |> {
+    \(plot_data) {
+      short <- colData(plot_data$short) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      long <- colData(plot_data$long) |>
+        with(interaction(sample_name, tissue, drop = TRUE))
+      common <- intersect(short, long)
+      rownames(se(plot_data[[2]])) <- rownames(se(plot_data[[1]]))
+      purrr::map2(
+        plot_data,
+        list(short, long),
+        ~ .x[,match(common, .y)])
+    }
+  }() |>
+  lapply(as_tibble) |>
+  dplyr::bind_rows() |>
+  tidyr::pivot_wider(
+    id_cols = c(.features, sample_name, tissue),
+    names_from = seq_source,
+    values_from = TPM
+  ) |>
+  filter(if_all(ends_with("read"),
+                ~ .x > 1)) |>
+  mutate(across(ends_with("read"),
+                ~ log10(.x), 
+                .names = "{.col}_log10"))
+cor(plot_data$short_read_log10, plot_data$long_read_log10)
+.plot_genes <- ggplot(plot_data, aes(short_read_log10, long_read_log10)) +
+  geom_hex(binwidth = .125) +
+  scale_fill_gradient(low = "white", high = "black") +
+  geom_abline(color = "limegreen", slope = 1, intercept = 0) +
+  theme_classic(base_size = 22) +
+  labs(y = "log10 ONT TPM", x = "log10 Illumina TPM",
+       title = "genes") +
+  guides(fill = guide_colorbar(
+    legend.title = element_text(vjust = .7),
+    position = "bottom", theme = theme(
+      legend.title = element_text(vjust = .7),
+      legend.text = element_text(size = 12, angle = 45, vjust = 1)))) +
+  coord_equal(xlim = c(0,5), ylim = c(0,5))
+
+ggsave(box::file("data", "fig1c-genes.png"), plot = .plot_genes, device = "png",
+       width = 5, height = 7)
+
+```
