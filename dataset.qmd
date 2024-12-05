@@ -5,36 +5,9 @@ author: justin landis
 
 ```{r setup}
 # general function to load packages and install if not available.
-require_packages <- function(packages, repo = c("CRAN", "Bioconductor")) {
-  repo <- match.arg(repo, c("CRAN", "Bioconductor"))
-  for (package in packages) {
-    if (!requireNamespace(package, quietly = TRUE)) {
-      res <- readline(paste0("Package ", package, " not found. Install? [y/n]"))
-      if (grepl("^y", res, ignore.case = TRUE)) {
-        switch(repo,
-               "Bioconductor" = {
-                 if (!requireNamespace("BiocManager", quietly = TRUE)) {
-                   install.packages("BiocManager")
-                 }
-                 BiocManager::install(package)
-               },
-               "CRAN" = {
-                 install.packages(package)
-               })
-      } else {
-        warning(paste0("Package ", package, " not installed."))
-      }
-    }
-  }
-}
 
-require_packages(
-  packages = c("dplyr", "readr", "purrr", "readxl", "stringr"),
-  repo = "CRAN")
-require_packages(
-  packages = c("SummarizedExperiment", "plyxp",
-    "plyranges", "rtracklayer"),
-  repo = "Bioconductor")
+
+
 
 ```
 
@@ -87,26 +60,6 @@ then the exons, before moving to a new level. Genes seem to be omitted.
 We will just verify quickly
 
 ```{r}
-.rle <- flair_gtf$type |>
-  as.character() |>
-  rle()
-
-trans <- local({
-  # keep all transcripts
-  transcripts <- filter(flair_gtf, type == "transcript")
-  .exons <- filter(flair_gtf, type == "exon")
-  # make grouping numbers
-  .exons$transcript_group <- .rle$lengths[.rle$values=="exon"] |> {
-    \(x) rep(seq_along(x), x)
-    }()
-  # split gene identifier in this subset
-  exons <- split(.exons$gene_id, .exons$transcript_group)
-  # quickly check that the order is the same
-  all(transcripts$gene_id == purrr::map_chr(exons, ~unique(.x)))
-  # make a compressed glist and send back to transcripts list
-  transcripts$exons <- split(.exons, .exons$transcript_group)
-  transcripts
-})
 
 ```
 
@@ -137,112 +90,7 @@ likely previously known, whereas those with a hash are new ids.
 The gtex counts also has a naming convention. we will investigate by spliting
 the identifier into three fields.
 
-```{r}
-gtex <- mutate(.gtex,
-       key = stringr::str_extract(transcript, "^[^_]+"),
-       .before = transcript)
-trans <- trans|>
-  mutate(
-    key = stringr::str_extract(transcript_id, "^[^_]+")
-  )
 
-dup_key <- anyDuplicated(gtex$key) # there is one key that is duplicated??
-dup_key <- gtex$key[dup_key]
-
-# just check to see how many are duplicated in each tabble
-filter(gtex, key %in% dup_key)$transcript
-filter(trans, key %in% dup_key)$transcript_id
-ind <- which(trans$key %in% dup_key) # get the index
-ord <- match(gtex$key, trans$key)
-ind1 <- which(ord == ind[1]) #first index
-trans_ <- trans[ord]
-trans_[ind1[2]] <- trans[ind[2]]
-
-col_data <- readxl::read_xlsx("data/metadata.xlsx",
-                              sheet = "Suppl.Table1",
-                              range = "A1:T97")
-
-col_slice <- match(colnames(select(gtex, -key, -transcript)),
-                   col_data$sample_id)
-
-se <- SummarizedExperiment(
-  assays = list(
-    counts = gtex |> select(-key) |> {
-      \(x) {
-        rnms <- x$transcript
-        x <- select(x, -transcript)
-        x <- as.matrix(x)
-        rownames(x) <- rnms
-        x
-      }
-    }()
-  ),
-  rowRanges = trans_,
-  colData = as(col_data[col_slice,], "DFrame")
-) |>
-  #wrapper class for SummarizedExperiment
-  PlySummarizedExperiment() |>
-  group_by(cols(sample_name)) |>
-  mutate(
-    cols(RBP_kd = case_when(
-      !grepl("Cells - Cultured fibroblasts", tissue) ~ NA, #only fibroblasts
-      grepl("exp", sample_id) ~ TRUE, # exp for experimental purtebation
-      any(grepl("exp", sample_id)) ~ FALSE, # all other items in group are false
-      TRUE ~ NA # everything else should be NA
-      ))
-  ) |>
-  ungroup()
-# se
-
-RBP_kd <- filter(se, cols( !is.na(RBP_kd) ))
-# the above is a subset of the below.
-fibroblasts <- filter(se, cols(tissue == "Cells - Cultured fibroblasts"))
-filter(fibroblasts, cols(is.na(RBP_kd))) |> pull(cols(sample_name)) |> table()
-k562 <- filter(se, cols(sample_name == "K562"))
-donor <- filter(se,
-  cols(
-    !tissue %in% c("Cells - Cultured fibroblasts", "K562")
-  )
-)
-donor |> pull(cols(tissue)) |> table()
-
-```
-
-```{r more-meta-data}
-#| eval: false
-
-`%|E|%` <- function(e1, e2) if (rlang::is_empty(e1)) e2 else e1 
-# se |>
-#   mutate(
-#     cols(
-#       .string = stringr::str_match_all(
-#         sample_id, "(GTEX-[^-]+)-([^-]+-?.*)-SM-(.*)"
-#       ),
-#       tissue_id = purrr::map_chr(.string, ~ .x[,3] %|E|% NA_character_),
-#       rep_id = purrr::map_chr(.string,  ~ .x[,4] %|E|% NA_character_),
-#       tech_id = stringr::str_extract(rep_id, "_.*") |> stringr::str_remove("^_"),
-#       rep_id = stringr::str_remove(rep_id, "_.*")
-#     )
-#   ) |>
-#   colData() |>
-#   as_tibble() |>
-#   select(sample_id, sample_name, tissue_id, rep_id, tech_id, tissue) |>
-#   distinct(sample_name, tissue_id, tissue) |>
-#   arrange(tissue_id, sample_name) |>
-#   readr::write_csv(file = "data/tissue_meta_map.csv")
-# 
-# se(se) |> rowRanges() |> {
-#     \(x) {
-#         tibble(
-#             gene_id = x$gene_id,
-#             start = start(x),
-#             end = end(x),
-#             seqnames = as.character(seqnames(x)),
-#             strand = as.character(strand(x))
-#         )
-#     }
-# }() |> readr::write_csv(file = "data/ranges_meta_map.csv")
-```
 
 
 ```{r quantify_tss}
