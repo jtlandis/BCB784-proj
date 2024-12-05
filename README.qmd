@@ -1,0 +1,78 @@
+---
+format: md
+---
+
+# BCB784-proj
+
+
+Data analysis is distributed amongst other R scripts, some of which use the 
+[box](https://github.com/klmr/box) package syntax to make R scripts into 
+reproducible modules (similar to python)
+
+### Data Availability
+
+Small files are stored in the `/data` directory.
+
+Data files that are too large for github may be temporarily found via [google drive](https://drive.google.com/file/d/1kA661pwAmi0wLTlGC3YhXbE5J_nwMui2/view?usp=drive_link)
+
+Source data may be found from the gtex portal with the 
+[long read](https://gtexportal.org/home/downloads/adult-gtex/long_read_data) and
+[short read](https://gtexportal.org/home/downloads/adult-gtex/bulk_tissue_expression)
+data.
+
+## loading data
+
+```{r}
+box::use(
+  # ensures packages are loaded and attached
+  # if `plyxp` is not be available for the user, in which
+  # case they should either upgrade their `BiocManager`
+  # version to 3.20, or use `remotes::install_github("jtlandis/plyxp")`
+  analysis/dependencies[...],
+  # makes various datasets available
+  analysis/datasets
+)
+
+# long read data
+datasets$se_long
+# short read data
+datasets$se_short
+```
+
+### datasets annotations
+
+Please see [`analysis/datasets.R`] as most values exported are annotated there.
+
+### Subsetting short read Samples
+
+Please see [`data/filter_short_read_bulk_RNAseq.R`] for source code on subsetting
+large rna-seq samples.
+
+## Data Summary
+
+The GTEX short read data contains many different versions, the two most recent 
+being version 8 and version 10. Given that the 
+[associated paper](https://www.nature.com/articles/s41586-022-05035-y)
+stated they used Gencode Version 26, we opted to use GTEX version 8. The long
+read data only has one GTEX version available, version 9, which is not annotated
+as to which Gencode version was used.
+
+## Figure Reproduction
+
+```{r}
+box::use(f1c = analysis/fig1c,
+         ggplot2[...])
+
+f1c$plot_figc(f1c$plot_data_transcripts) +
+  ggtitle("Transcripts")
+f1c$plot_figc(f1c$plot_data_genes) +
+  ggtitle("Genes")
+```
+
+
+
+
+
+
+
+
