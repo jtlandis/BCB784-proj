@@ -95,5 +95,5 @@ se$sample_name <- stringr::str_extract(colnames(se), "GTEX-[^-]+")
 saveRDS(se, box::file("bulk_RNAseq.rds"))
 se_small <- se[,se$sample_name %in% col_meta$sample_name]
 # google download link ~ 150MB:
-# https://drive.google.com/file/d/1GMOuWT3ndUYDLRW5rML8TGn2Zg7vCpgq/view?usp=sharing
-saveRDS(se_small, box::file("bulk_RNAseq_small.rds"))
+# https://drive.google.com/file/d/1kA661pwAmi0wLTlGC3YhXbE5J_nwMui2/view?usp=drive_link
+saveRDS(se_small, box::file("bulk_RNAseq_shortread-subset_v8.1.rds"))
