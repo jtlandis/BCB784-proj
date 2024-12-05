@@ -90,6 +90,8 @@ table(ranges(rr_long)==ranges(rr_short))
 
 ## Figure Reproduction
 
+From [`analysis/fig1c.R`](https://github.com/jtlandis/BCB784-proj/blob/justin-dev/analysis/fig1c.R)
+
 ```{r}
 box::use(f1c = analysis/fig1c,
          ggplot2[...])
