@@ -90,13 +90,15 @@ datasets$se_short
 
 ### datasets annotations
 
-Please see \[`analysis/datasets.R`\] as most values exported are
-annotated there.
+Please see
+[`analysis/datasets.R`](https://github.com/jtlandis/BCB784-proj/blob/justin-dev/analysis/datasets.R)
+as most values exported are annotated there.
 
 ### Subsetting short read Samples
 
-Please see \[`data/filter_short_read_bulk_RNAseq.R`\] for source code on
-subsetting large rna-seq samples.
+Please see
+[`data/filter_short_read_bulk_RNAseq.R`](https://github.com/jtlandis/BCB784-proj/blob/justin-dev/data/filter_short_read_bulk_RNAseq.R)
+for source code on subsetting large rna-seq samples.
 
 ## Data Summary
 
@@ -106,6 +108,40 @@ paper](https://www.nature.com/articles/s41586-022-05035-y) stated they
 used Gencode Version 26, we opted to use GTEX version 8. The long read
 data only has one GTEX version available, version 9, which is not
 annotated as to which Gencode version was used.
+
+### Gencode Issues
+
+``` r
+long_trans <- rowData(datasets$se_long)$transcript_id
+short_trans <- rowData(datasets$se_short)$transcript_id
+common_trans <- intersect(long_trans, short_trans)
+
+match_trans <- function(se, trans) {
+  rr <- rowRanges(se)[match(common_trans, trans)]
+  id <- rr$transcript_id
+  mcols(rr) <- NULL
+  mcols(rr)$id <- id
+  rr
+}
+
+rr_long <- match_trans(se(datasets$se_long), long_trans)
+rr_short <- match_trans(se(datasets$se_short), short_trans)
+
+#confirm all transcript ids are identical
+# sanity check
+all(identical(rr_long$id, rr_short$id))
+```
+
+    [1] TRUE
+
+``` r
+# only ~2,500 transcripts of the ~19,000 are identical
+table(ranges(rr_long)==ranges(rr_short))
+```
+
+
+    FALSE  TRUE 
+    16893  2576 
 
 ## Figure Reproduction
 
@@ -117,11 +153,11 @@ f1c$plot_figc(f1c$plot_data_transcripts) +
   ggtitle("Transcripts")
 ```
 
-![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-2-1.png)
+![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-3-1.png)
 
 ``` r
 f1c$plot_figc(f1c$plot_data_genes) +
   ggtitle("Genes")
 ```
 
-![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-2-2.png)
+![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-3-2.png)
