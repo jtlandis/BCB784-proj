@@ -156,11 +156,11 @@ f1c$plot_figc(f1c$plot_data_transcripts) +
   ggtitle("Transcripts")
 ```
 
-![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-3-1.png)
+![](README.markdown_strict_files/figure-markdown_strict/fig1c-1.png)
 
 ``` r
 f1c$plot_figc(f1c$plot_data_genes) +
   ggtitle("Genes")
 ```
 
-![](README.markdown_strict_files/figure-markdown_strict/unnamed-chunk-3-2.png)
+![](README.markdown_strict_files/figure-markdown_strict/fig1c-2.png)

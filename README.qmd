@@ -22,7 +22,7 @@ data.
 
 ## loading data
 
-```{r}
+```{r using_box}
 box::use(
   # ensures packages are loaded and attached
   # if `plyxp` is not be available for the user, in which
@@ -62,7 +62,7 @@ as to which Gencode version was used.
 
 ### Gencode Issues
 
-```{r}
+```{r gencode_issues}
 long_trans <- rowData(datasets$se_long)$transcript_id
 short_trans <- rowData(datasets$se_short)$transcript_id
 common_trans <- intersect(long_trans, short_trans)
@@ -92,7 +92,7 @@ table(ranges(rr_long)==ranges(rr_short))
 
 From [`analysis/fig1c.R`](https://github.com/jtlandis/BCB784-proj/blob/justin-dev/analysis/fig1c.R)
 
-```{r}
+```{r fig1c}
 box::use(f1c = analysis/fig1c,
          ggplot2[...])
 
