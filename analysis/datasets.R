@@ -16,6 +16,7 @@ is_hash <- function(x) {
     x)
 }
 
+#' @title Flair GTF
 #' @description
 #' longread GTEX entire gtf file asis
 #' 
@@ -25,6 +26,7 @@ flair_gtf <- import(
             "flair_filter_transcripts.gtf.gz")
 )
 
+#' @title raw gtx data
 #' @description
 #' GTEX data as a data.frame
 #' @export
@@ -38,6 +40,7 @@ gtex_data <- read_table(
     .before = transcript
   )
 
+#' @title rowData
 #' @description
 #' GRanges object of the `flair_gtf` object that only contains
 #' the transcripts. The exons for each transcript is within the
@@ -83,7 +86,7 @@ stopifnot(
   identical(trans$key, gtex_data$key)
 )
 
-
+#' @title colData
 #' @description
 #' sample meta data. This is the colData of the `se_long` object
 #' @export
@@ -101,6 +104,7 @@ stopifnot(
 )
 
 
+#' @title Long Read RNA-seq Data
 #' @name se_long
 #' @description
 #' The main dataset of long reads represented in a `PlySummarizedExperiment`,
@@ -109,57 +113,32 @@ stopifnot(
 #' use the `plyxp::se()` function.
 #' 
 #' @export
-se_long <- SummarizedExperiment(
-  assays = list(
-    counts = gtex_data |> select(-key) %>% {
-      rnms <- .$transcript
-      x <- select(., -transcript)
-      x <- as.matrix(x)
-      rownames(x) <- rnms
-      x
-    }
-  ),
-  rowRanges = trans,
-  colData = as(col_data[col_slice,], "DFrame")
-) |>
-  new_plyxp() |>
-  group_by(cols(sample_name)) |>
-  mutate(
-    cols(RBP_kd = case_when(
-      !grepl("Cells - Cultured fibroblasts", tissue) ~ NA, #only fibroblasts
-      grepl("exp", sample_id) ~ TRUE, # exp for experimental purtebation
-      any(grepl("exp", sample_id)) ~ FALSE, # all other items in group are false
-      TRUE ~ NA # everything else should be NA
-    ))
-  ) |>
-  ungroup()
+NULL
 
-
+#' @title Subsets of Long Read data
 #' @name se_long_subsets
 #' @description
 #' Subset of RBP knockdowns
+#' @aliases se_RBP_kd se_fibroblasts se_k562 se_donor
 #' @export
-se_RBP_kd <- filter(se, cols( !is.na(RBP_kd) ))
+NULL
 # the above is a subset of the below.
 
 #' @describeIn se_long_subsets only fibroblasts cells
 #' @export
-se_fibroblasts <- filter(se, cols(tissue == "Cells - Cultured fibroblasts"))
+NULL
 
 #' @describeIn se_long_subsets The 4 k562 cells used for quality control
 #' @export
-se_k562 <- filter(se, cols(sample_name == "K562"))
+NULL
 
 #' @describeIn se_long_subsets Donor tissues
 #' @export
-se_donor <- filter(se,
-                cols(
-                  !tissue %in% c("Cells - Cultured fibroblasts", "K562")
-                )
-)
+NULL
 
 
-
+#' @title TSS groups
+#' @name se_long_tss_groups
 #' @description
 #' A subset summary (by rows) of unique TSS. 
 #' TSS were grouped by transcription start site position and seqname
@@ -179,46 +158,151 @@ se_donor <- filter(se,
 #' Thus values between 1-7 are possible for the `encode_type`
 #' 
 #' @export
-se_long_tss_groups <- local({
-  .se <- plyxp_on(
-    se_long, .on = rowRanges,
-    mutate,
-    .start = start,
-    .seqnames = as.character(seqnames),
-    new_transcript = is_hash(transcript_id),
-    has_ensbl_parent = grepl("^ENSG", gene_id)
-  ) |>
-    group_by(rows(.start, .seqnames))
-  rr <- .se |> {
-    function(se) {
-      row_groups <- group_data(se)$row_groups
-      groups <- vctrs::list_unchop(
-        as.list(row_groups$.indices_group_id),
-        indices = row_groups$.indices)
-      rr <- rowRanges(se(se))
-      mcols(rr) <- NULL
-      mcols(rr)$.exons <- rowData(se)$exons
-      split(rr, groups)
+NULL
+
+#' @title Short Read RNAseq data
+#' @name se_short
+#' @description
+#' A short description...
+#' 
+#' @export
+NULL
+
+cache_this <- function(.expr, .name) {
+  env <- rlang::env_parent()
+  .expr <- rlang::enexpr(.expr)
+  expr <- rlang::expr(
+    {
+      res <- .cache[[!!.name]]
+      if (is.null(res)) {
+        res <- .cache[[!!.name]] <- {
+          !!.expr
+        }
+      }
+      res
     }
-  }()
-  
-  .se <- .se |> 
-    summarise(
-      rows(
-        n = n(),
-        n_novel = sum(!has_ensbl_parent & new_transcript),
-        n_novel_ensbl = sum(has_ensbl_parent & new_transcript),
-        n_not_novel = sum(!new_transcript),
-        across(c(gene_id, transcript_id), list)
+  )
+  rlang::new_function(
+    pairlist(), body = expr, env = env
+  )
+}
+
+.cache <- new.env()
+
+rlang::env_bind_active(
+  .env = rlang::current_env(),
+  se_long = cache_this(
+    SummarizedExperiment(
+      assays = list(
+        counts = gtex_data |> select(-key) %>% {
+          rnms <- .$transcript
+          x <- select(., -transcript)
+          x <- as.matrix(x)
+          rownames(x) <- rnms
+          x
+        }
       ),
-      counts = list(counts)
-    )
-  rowData(.se)$.ranges <- rr
-  ungrouop(.se) |>
-    mutate(
-      rows(
-        encode_type = (n_novel>0) + (2 * (n_novel_ensbl>0)) + (4 * (n_not_novel>0))
-      )
-    )
-})
+      rowRanges = trans,
+      colData = methods::as(col_data[col_slice,], "DFrame")
+    ) |>
+      new_plyxp() |>
+      group_by(cols(sample_name)) |>
+      mutate(
+        cols(RBP_kd = case_when(
+          !grepl("Cells - Cultured fibroblasts", tissue) ~ NA, #only fibroblasts
+          grepl("exp", sample_id) ~ TRUE, # exp for experimental purtebation
+          any(grepl("exp", sample_id)) ~ FALSE, # all other items in group are false
+          TRUE ~ NA # everything else should be NA
+        ))
+      ) |>
+      ungroup(),
+    "se_long"
+  ),
+  se_RBP_kd = cache_this(
+    filter(se_long, cols( !is.na(RBP_kd) )), "se_RBP_kd"
+  ),
+  se_fibroblasts = cache_this(
+    filter(se_long, cols(tissue == "Cells - Cultured fibroblasts")),
+    "se_fibroblasts"
+  ),
+  se_k562 = cache_this(
+    filter(se_long, cols(sample_name == "K562")),
+    "se_k562"
+  ),
+  se_donor = cache_this(
+    filter(se_long,
+           cols(
+             !tissue %in% c("Cells - Cultured fibroblasts", "K562")
+           )),
+    "se_donor"
+  ),
+  se_long_tss_groups = cache_this(
+    {
+      local({
+        .se <- plyxp_on(
+          se_long, .on = rowRanges,
+          mutate,
+          .start = start,
+          .seqnames = case_when(
+            strand == "-" ~ end,
+            TRUE ~ start
+          ),
+          new_transcript = is_hash(transcript_id),
+          has_ensbl_parent = grepl("^ENSG", gene_id)
+        ) |>
+          group_by(rows(.start, .seqnames))
+        rr <- .se |> {
+          function(se) {
+            row_groups <- group_data(se)$row_groups
+            groups <- vctrs::list_unchop(
+              as.list(row_groups$.indices_group_id),
+              indices = row_groups$.indices)
+            rr <- rowRanges(se(se))
+            mcols(rr) <- NULL
+            mcols(rr)$.exons <- rowData(se)$exons
+            split(rr, groups)
+          }
+        }()
+        
+        .se <- .se |> 
+          summarise(
+            rows(
+              n = n(),
+              n_novel = sum(!has_ensbl_parent & new_transcript),
+              n_novel_ensbl = sum(has_ensbl_parent & new_transcript),
+              n_not_novel = sum(!new_transcript),
+              across(c(gene_id, transcript_id), list)
+            ),
+            counts = list(counts)
+          )
+        rowData(.se)$.ranges <- rr
+        ungroup(.se) |>
+          mutate(
+            rows(
+              encode_type = (n_novel>0) + (2 * (n_novel_ensbl>0)) + (4 * (n_not_novel>0))
+            )
+          )
+      })
+    },
+    "se_long_tss_groups"
+  ),
+  se_short = cache_this(
+    box::file("..", "data","bulk_RNAseq_shortread-subset_v8.1.rds") |>
+      readRDS() |>
+      new_plyxp(),
+    "se_short")
+)
+
+box::export(
+  flair_gtf,
+  gtex_data,
+  trans_data,
+  se_long,
+  se_RBP_kd,
+  se_fibroblasts,
+  se_k562,
+  se_donor,
+  se_long_tss_groups,
+  se_short
+)
 
