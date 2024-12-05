@@ -1,0 +1,600 @@
+---
+title: GTEX PTBP1
+author: justin landis
+---
+
+```{r setup}
+# general function to load packages and install if not available.
+require_packages <- function(packages, repo = c("CRAN", "Bioconductor")) {
+  repo <- match.arg(repo, c("CRAN", "Bioconductor"))
+  for (package in packages) {
+    if (!requireNamespace(package, quietly = TRUE)) {
+      res <- readline(paste0("Package ", package, " not found. Install? [y/n]"))
+      if (grepl("^y", res, ignore.case = TRUE)) {
+        switch(repo,
+               "Bioconductor" = {
+                 if (!requireNamespace("BiocManager", quietly = TRUE)) {
+                   install.packages("BiocManager")
+                 }
+                 BiocManager::install(package)
+               },
+               "CRAN" = {
+                 install.packages(package)
+               })
+      } else {
+        warning(paste0("Package ", package, " not installed."))
+      }
+    }
+  }
+}
+
+require_packages(
+  packages = c("dplyr", "readr", "purrr", "readxl", "stringr"),
+  repo = "CRAN")
+require_packages(
+  packages = c("SummarizedExperiment", "plyxp",
+    "plyranges", "rtracklayer"),
+  repo = "Bioconductor")
+
+```
+
+```{r data_download}
+#download data
+
+download_file <- function(url, destfile) {
+  if (!file.exists("data")) {
+    dir.create("data")
+  }
+  if (!file.exists(sprintf("data/%s", destfile))) {
+    destfile <- sprintf("data/%s", destfile)
+    download.file(url, destfile = destfile)
+  }
+}
+
+
+download_file("https://storage.googleapis.com/adult-gtex/long-read-data/v9/long-read-RNA-seq/quantification_flair_filter.counts.txt.gz",
+              destfile = "quantification_flair_filter.counts.txt.gz")
+download_file("https://storage.googleapis.com/adult-gtex/long-read-data/v9/long-read-RNA-seq/flair_filter_transcripts.gtf.gz",
+              destfile = "flair_filter_transcripts.gtf.gz")
+download_file("https://static-content.springer.com/esm/art%3A10.1038%2Fs41586-022-05035-y/MediaObjects/41586_2022_5035_MOESM4_ESM.xlsx",
+  destfile = "metadata.xlsx")
+
+```
+
+
+```{r}
+
+library(SummarizedExperiment)
+library(dplyr)
+library(plyranges)
+library(plyxp)
+
+flair_gtf <- rtracklayer::import("data/flair_filter_transcripts.gtf.gz")
+
+.gtex <- readr::read_table(
+  "data/quantification_flair_filter.counts.txt.gz",
+  col_names = TRUE, show_col_types = FALSE)
+head(.gtex)
+.gtex$transcript[1]
+dim(.gtex)
+```
+
+
+organizing the gtf ranges provided by the paper. I believe we will start with
+the transcript level first. traditionally, gtf states a gene, transcript, and
+then the exons, before moving to a new level. Genes seem to be omitted.
+
+We will just verify quickly
+
+```{r}
+.rle <- flair_gtf$type |>
+  as.character() |>
+  rle()
+
+trans <- local({
+  # keep all transcripts
+  transcripts <- filter(flair_gtf, type == "transcript")
+  .exons <- filter(flair_gtf, type == "exon")
+  # make grouping numbers
+  .exons$transcript_group <- .rle$lengths[.rle$values=="exon"] |> {
+    \(x) rep(seq_along(x), x)
+    }()
+  # split gene identifier in this subset
+  exons <- split(.exons$gene_id, .exons$transcript_group)
+  # quickly check that the order is the same
+  all(transcripts$gene_id == purrr::map_chr(exons, ~unique(.x)))
+  # make a compressed glist and send back to transcripts list
+  transcripts$exons <- split(.exons, .exons$transcript_group)
+  transcripts
+})
+
+```
+
+There are some hash patterns in the transcript_id mcols field.
+
+```{r}
+
+is_hash <- function(x) {
+  grepl(
+      "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+      x)
+}
+
+.t <- trans |>
+  mutate(
+    has_hash = is_hash(transcript_id),
+    ensbl_only = grepl("^ENS", transcript_id)
+  )
+
+# they are disjoint sets
+any(.t$has_hash & .t$ensbl_only)
+sum(.t$has_hash, .t$ensbl_only)
+```
+
+Based on the above results we can see that those identified with an ENSBL are
+likely previously known, whereas those with a hash are new ids.
+
+The gtex counts also has a naming convention. we will investigate by spliting
+the identifier into three fields.
+
+```{r}
+gtex <- mutate(.gtex,
+       key = stringr::str_extract(transcript, "^[^_]+"),
+       .before = transcript)
+trans <- trans|>
+  mutate(
+    key = stringr::str_extract(transcript_id, "^[^_]+")
+  )
+
+dup_key <- anyDuplicated(gtex$key) # there is one key that is duplicated??
+dup_key <- gtex$key[dup_key]
+
+# just check to see how many are duplicated in each tabble
+filter(gtex, key %in% dup_key)$transcript
+filter(trans, key %in% dup_key)$transcript_id
+ind <- which(trans$key %in% dup_key) # get the index
+ord <- match(gtex$key, trans$key)
+ind1 <- which(ord == ind[1]) #first index
+trans_ <- trans[ord]
+trans_[ind1[2]] <- trans[ind[2]]
+
+col_data <- readxl::read_xlsx("data/41586_2022_5035_MOESM4_ESM.xlsx",
+                              sheet = "Suppl.Table1",
+                              range = "A1:T97")
+
+col_slice <- match(colnames(select(gtex, -key, -transcript)),
+                   col_data$sample_id)
+
+se <- SummarizedExperiment(
+  assays = list(
+    counts = gtex |> select(-key) |> {
+      \(x) {
+        rnms <- x$transcript
+        x <- select(x, -transcript)
+        x <- as.matrix(x)
+        rownames(x) <- rnms
+        x
+      }
+    }()
+  ),
+  rowRanges = trans_,
+  colData = as(col_data[col_slice,], "DFrame")
+) |>
+  #wrapper class for SummarizedExperiment
+  PlySummarizedExperiment() |>
+  group_by(cols(sample_name)) |>
+  mutate(
+    cols(RBP_kd = case_when(
+      !grepl("Cells - Cultured fibroblasts", tissue) ~ NA, #only fibroblasts
+      grepl("exp", sample_id) ~ TRUE, # exp for experimental purtebation
+      any(grepl("exp", sample_id)) ~ FALSE, # all other items in group are false
+      TRUE ~ NA # everything else should be NA
+      ))
+  ) |>
+  ungroup()
+# se
+
+RBP_kd <- filter(se, cols( !is.na(RBP_kd) ))
+# the above is a subset of the below.
+fibroblasts <- filter(se, cols(tissue == "Cells - Cultured fibroblasts"))
+filter(fibroblasts, cols(is.na(RBP_kd))) |> pull(cols(sample_name)) |> table()
+k562 <- filter(se, cols(sample_name == "K562"))
+donor <- filter(se,
+  cols(
+    !tissue %in% c("Cells - Cultured fibroblasts", "K562")
+  )
+)
+donor |> pull(cols(tissue)) |> table()
+
+```
+
+```{r more-meta-data}
+#| eval: false
+`%|E|%` <- function(e1, e2) if (rlang::is_empty(e1)) e2 else e1 
+# se |>
+#   mutate(
+#     cols(
+#       .string = stringr::str_match_all(
+#         sample_id, "(GTEX-[^-]+)-([^-]+-?.*)-SM-(.*)"
+#       ),
+#       tissue_id = purrr::map_chr(.string, ~ .x[,3] %|E|% NA_character_),
+#       rep_id = purrr::map_chr(.string,  ~ .x[,4] %|E|% NA_character_),
+#       tech_id = stringr::str_extract(rep_id, "_.*") |> stringr::str_remove("^_"),
+#       rep_id = stringr::str_remove(rep_id, "_.*")
+#     )
+#   ) |>
+#   colData() |>
+#   as_tibble() |>
+#   select(sample_id, sample_name, tissue_id, rep_id, tech_id, tissue) |>
+#   distinct(sample_name, tissue_id, tissue) |>
+#   arrange(tissue_id, sample_name) |>
+#   readr::write_csv(file = "data/tissue_meta_map.csv")
+# 
+# se(se) |> rowRanges() |> {
+#     \(x) {
+#         tibble(
+#             gene_id = x$gene_id,
+#             start = start(x),
+#             end = end(x),
+#             seqnames = as.character(seqnames(x)),
+#             strand = as.character(strand(x))
+#         )
+#     }
+# }() |> readr::write_csv(file = "data/ranges_meta_map.csv")
+```
+
+
+```{r quantify_tss}
+se <- plyxp(se,
+      \(se) {
+        rr <- rowRanges(se)
+        rr$.start <- start(rr)
+        rr$.seqnames <- seqnames(rr)
+        rowRanges(se) <- rr
+        se
+      })
+se2 <- mutate(
+  se,
+  rows(
+    new_transcript = is_hash(transcript_id),
+    has_ensbl_parent = grepl("^ENSG", gene_id)
+  )) |>
+  group_by(rows(.start, .seqnames = as.character(.seqnames))) 
+rr <-  se2 |> {
+    function(se) {
+      row_groups <- group_data(se)$row_groups
+      groups <- vctrs::list_unchop(
+        as.list(row_groups$.indices_group_id),
+        indices = row_groups$.indices)
+      rr <- rowRanges(se(se))
+      mcols(rr) <- NULL
+      mcols(rr)$.exons <- rowData(se)$exons
+      split(rr, groups)
+    }
+  }()
+se2 <- se2 |> summarise(rows(
+    n = n(),
+    n_novel = sum(!has_ensbl_parent & new_transcript),
+    n_novel_ensbl = sum(has_ensbl_parent & new_transcript),
+    n_not_novel = sum(!new_transcript),
+    across(c(gene_id, transcript_id), list)
+  ),
+  counts = list(counts))
+rowData(se2)$.ranges <- rr
+se2 <- ungroup(se2) |>
+  mutate(
+    rows(
+      # similar to file permissions,
+      # 1 -> novel: contains transcript with no associated gene parent and has hash
+      # 2 -> ensbl novel: contains transcript with associated gene parent and has hash
+      # 4 -> not novel: contains transcript that has no hash (assumed to have a genee parent)
+      encode_type = (n_novel>0) + (2 * (n_novel_ensbl>0)) + (4 * (n_not_novel>0))
+    )
+  )
+
+
+saveRDS(se(se2), box::file("data/longRead.rds"))
+
+pull(se2, rows(encode_type)) |> table()
+```
+
+```{r}
+# rr <- rowRanges(se(se))
+se_small <- readRDS(box::file("data/bulk_RNAseq_small_v8.rds"))
+# rr_small <- rowRanges(se_small)
+# rr_split <- split(rr, rr$gene_id)
+# rr_sml_split <- split(rr_small, rr_small$gene_id)
+# same_names <- names(rr_sml_split)[names(rr_sml_split) %in% names(rr_split)]
+# 
+# rr_split <- rr_split[same_names]
+# rr_sml_split <- rr_sml_split[same_names]
+# .common_trans <- intersect(rr$transcript_id, rr_small$transcript_id)
+# long_rr_trans <- slice(rr, match(.common_trans, transcript_id))
+# short_rr_trans <- slice(rr_small, match(.common_trans, transcript_id)) 
+```
+
+```{r}
+.common_trans <- intersect(
+  rowData(se)$transcript_id,
+  rowData(se_small)$transcript_id
+)
+se_long <- se[match(.common_trans, rowData(se)$transcript_id),] |>
+  mutate(cols(seq_source = "long_read"))
+se_short <- se_small[match(.common_trans, rowData(se_small)$transcript_id),] |>
+  new_plyxp() |>
+  mutate(cols(seq_source = "short_read"),
+         counts = as.integer(round(rsem)))
+# assume x, y have same row info
+merge_cols <- function(x, y, ...) {
+  # browser()
+  quos <- plyxp:::plyxp_quos(..., .named = F, .ctx_default = "assays",
+                             .ctx_opt = "cols")
+  quos <- split(lapply(quos, rlang::quo_get_expr),
+                vapply(quos, attr, "plyxp:::ctx", FUN.VALUE = ""))
+  
+  x <- select(x, !!!quos[["assays"]], rows(everything()),
+              cols(!!!quos[["cols"]]))
+  y <- select(y, !!!quos[["assays"]], cols(!!!quos[["cols"]])) |>
+    plyxp(\(y, x) {
+      rowRanges(y) <- rowRanges(x)
+      y
+    }, x = se(x))
+  
+  se <- cbind(
+    se(x), se(y)
+  )
+  new_plyxp(se)
+}
+merged_se <- merge_cols(se_long, se_short, counts,
+                        cols(sample_name, tissue, seq_source))
+
+apply_by <- function(..., .fun, .by, .args = NULL) {
+  # browser()
+  
+  .l <- rlang::dots_list(...) 
+  .l <- vctrs::vec_recycle_common(!!!.l)
+  .l <- lapply(.l, split, .by)
+  .fun <- rlang::as_function(.fun)
+  purrr::map(
+    seq_along(.l[[1]]),
+    \(.i, l, .fun, .args) {
+      .l <- lapply(l, `[[`, .i)
+      rlang::exec(.f = .fun, !!!.l, !!!.args)
+    },
+    l = .l,
+    .fun = .fun,
+    .args = .args
+  )
+}
+apply_by(1:4, .f = sum, .by = c(1,1,2,2))
+merged_se |>
+  mutate(
+    cols(
+      total = colSums(.assays_asis$counts),
+      scaleFactor = total/1e6
+    ),
+    scaled = counts / .cols$scaleFactor,
+    large = scaled > 1
+  ) |>
+  filter(
+    rows(
+      #find genes that have "large" counts in both 'long' and
+      # 'short' reads
+      purrr::map_lgl(
+        .assays$large,
+        ~ rlang::exec(all, !!!apply_by(.x, .fun = any, .by = .cols_asis$seq_source)))))
+        # .f = apply_by,
+        # .by = .cols_asis$seq_source,
+        # .fun = ~ any(.x)) |>
+        # purrr::map_lgl(~ rlang::exec(all, !!!.x))
+  #   )
+  # )
+  
+
+  
+
+```
+
+
+```{r}
+
+## looking for highly expressed genes - using these to look at the ATAC-seq peaks
+
+#Find peak overlaps between atac and long read data (se in dataset.qmd) with specific interest in finding #correlation between peaks and the novel transcripts.
+
+merged_se |>
+  mutate(
+    rows(
+      mean_exp = rowMeans(.assays_asis$counts)
+    )
+  ) |>
+  arrange(rows(-mean_exp)) %>%
+  .[1:100,] |> select(everything(), rows(mean_exp))
+```
+
+```{r}
+library(GenomicRanges)
+library(ggplot2)
+
+analyze_atac_seq <- function(bed_files, long_read_ranges) {
+  results <- data.frame(
+    Tissue = character(),
+    Percentage = numeric(),
+    Overlap_Scores = I(list()), 
+    stringsAsFactors = FALSE
+  )
+  
+  for (bed_file in bed_files) {
+    # Extract tissue name from file path
+    tissue <- sub(".*/.*\\.AllAg\\.|\\.bed", "", bed_file)
+    
+    # Read the BED file
+    df <- read.table(bed_file, skip = 1, sep = "\t", header = FALSE, fill = TRUE)
+    colnames(df) <- c('Chr', 'start', 'end', 'info', 'scores', 'value2', 'value3', 'value4')
+    
+    # Create GRanges object for peaks
+    peak_ranges <- GRanges(seqnames = df$Chr, ranges = IRanges(start = df$start, end = df$end))
+    
+    # Check overlaps and extract scores
+    overlaps <- findOverlaps(long_read_ranges, peak_ranges)
+    overlap_scores <- df$scores[subjectHits(overlaps)]
+    unique_overlap_scores <- unique(overlap_scores)
+    
+    associated_count <- length(unique(queryHits(overlaps)))
+    percentage <- (associated_count / length(long_read_ranges)) * 100
+    
+    results <- rbind(
+      results,
+      data.frame(Tissue = tissue, Percentage = percentage, Overlap_Scores = I(list(unique_overlap_scores)))
+    )
+    
+    cat(tissue, "results! -----------------\n")
+    cat("Total number of transcripts:", length(long_read_ranges), "\n")
+    cat("Number of transcripts associated with peaks:", associated_count, "\n")
+    cat("Percentage of transcripts with ATAC-seq peaks:", percentage, "\n")
+    cat("Overlap scores:", paste(unique_overlap_scores, collapse = ", "), "\n\n")
+  }
+  
+  return(results)
+}
+
+# Define the list of BED files and the long read data
+bed_files <- c(
+  "./data/ATC.Liv.05.AllAg.Liver.bed",
+  "./data/ATC.Neu.05.AllAg.Prefrontal_Cortex.bed",
+  "./data/His.Myo.05.AllAg.Skeletal_muscle.bed",
+  "./data/His.Myo.05.AllAg.AllCell.bed",
+  "./data/His.CDV.05.AllAg.Aortic_smooth_muscle_cells.bed"
+)
+
+x_limits <- sub(".*/.*\\.AllAg\\.|\\.bed", "", bed_files)
+y_limits <- c(0, 100) 
+
+# Reading in long read data - getting transcripts information - TSS - all reads
+total_long_read_reads <- rowRanges(se(se))
+tss_data <- total_long_read_reads |> 
+  GenomicRanges::resize(width = 1) |>
+  GenomicRanges::resize(width = 2000, fix = 'center')
+
+# Run analysis
+results <- analyze_atac_seq(bed_files, tss_data)
+
+# Plot the results
+ggplot(results, aes(x = Tissue, y = Percentage, fill = Tissue)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  theme_minimal() +
+  labs(title = "Percentage of Transcripts Stating sites Associated with ATAC-seq Peaks",
+       x = "Tissue",
+       y = "Percentage") +
+  scale_fill_manual(values = c("skyblue", "lightgreen", "lightcoral", "pink", "orange")) +
+  scale_x_discrete(limits = x_limits) +
+  scale_y_continuous(limits = y_limits) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Reading in long read data - getting transcripts information - TSS - NOVEL
+filtered_indices <- which(rowData(se2)$encode_type %in% c(1,3,5))
+se2_filtered <- se2[filtered_indices, ]
+filtered_row_ranges_reads <- rowData(se2_filtered)
+filtered_row_ranges <- unlist(filtered_row_ranges_reads$.ranges)
+filt_tss_data <- filtered_row_ranges |> 
+  GenomicRanges::resize(width = 1) |>
+  GenomicRanges::resize(width = 2000, fix = 'center')
+
+# Run analysis
+results_novel <- analyze_atac_seq(bed_files, filt_tss_data)
+
+# Plot the results
+ggplot(results_novel, aes(x = Tissue, y = Percentage, fill = Tissue)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  theme_minimal() +
+  labs(title = "Percentage of Novel Transcripts Stating sites Associated with ATAC-seq Peaks",
+       x = "Tissue",
+       y = "Percentage") +
+  scale_fill_manual(values = c("skyblue", "lightgreen", "lightcoral", "pink", "orange")) +
+  scale_x_discrete(limits = x_limits) +
+  scale_y_continuous(limits = y_limits) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Reading in long read data - getting transcripts information - whole transcripts - all reads
+total_long_read_reads_t <- rowRanges(se(se))
+# Run analysis
+results_whole_transcript_t <- analyze_atac_seq(bed_files, total_long_read_reads_t)
+
+total_long_read_reads_t
+total_long_read_reads
+# Plot the results
+ggplot(results_whole_transcript_t, aes(x = Tissue, y = Percentage, fill = Tissue)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  theme_minimal() +
+  labs(title = "Percentage of Transcripts Associated with ATAC-seq Peaks",
+       x = "Tissue",
+       y = "Percentage") +
+  scale_fill_manual(values = c("darkblue", "darkgreen", "red", "hotpink", "darkorange")) +
+  scale_x_discrete(limits = x_limits) +
+  scale_y_continuous(limits = y_limits) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Reading in long read data - getting transcripts information - whole transcritps - NOVEL
+filtered_indices_t <- which(rowData(se2)$encode_type %in% c(1,3,5))
+se2_filtered_t <- se2[filtered_indices_t, ]
+filtered_row_ranges_reads_t <- rowData(se2_filtered_t)
+filtered_row_ranges_t <- unlist(filtered_row_ranges_reads_t$.ranges)
+
+# Run analysis
+results_novel_transcript_t <- analyze_atac_seq(bed_files, filtered_row_ranges_t)
+
+# Plot the results
+ggplot(results_novel_transcript_t, aes(x = Tissue, y = Percentage, fill = Tissue)) +
+  geom_bar(stat = "identity", width = 0.5) +
+  theme_minimal() +
+  labs(title = "Percentage of Novel Transcripts Associated with ATAC-seq Peaks",
+       x = "Tissue",
+       y = "Percentage") +
+  scale_fill_manual(values = c("darkblue", "darkgreen", "red", "hotpink", "darkorange")) +
+  scale_x_discrete(limits = x_limits) +
+  scale_y_continuous(limits = y_limits) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+# investigating different scores in the ATAC-seq data
+
+for (i in 1:nrow(results)) {
+  tissue <- results$Tissue[i]
+  all_tss_score <- results$Overlap_Scores[[i]]
+  novel_tss_score <- results_novel$Overlap_Scores[[i]]
+  all_transcript_score <- results_whole_transcript$Overlap_Scores[[i]]
+  novel_transcript_score <- results_novel_transcript$Overlap_Scores[[i]]
+  
+  all_scores <- data.frame(
+    Type = rep(c("all_tss", "novel_tss", "all_transcript", "novel_transcript"), 
+               times = c(length(unlist(all_tss_score)), 
+                         length(unlist(novel_tss_score)), 
+                         length(unlist(all_transcript_score)), 
+                         length(unlist(novel_transcript_score)))),
+    Score = c(unlist(all_tss_score),
+              unlist(novel_tss_score),
+              unlist(all_transcript_score),
+              unlist(novel_transcript_score))
+  )
+  
+  library(ggplot2)
+  
+  # Create and print the plot for the current tissue
+  p <- ggplot(all_scores, aes(x = Type, y = Score, fill = Type)) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(
+      title = paste("Spread of Overlap Scores for", tissue),
+      x = "Score Type",
+      y = "Score"
+    ) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    scale_fill_brewer(palette = "Set3")
+  
+  print(p) # Print the plot
+}
+```
+Box plot results.
